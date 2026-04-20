@@ -1,0 +1,755 @@
+import pytz
+import os
+import requests
+import time
+import threading
+import asyncio
+import json
+import shutil
+import traceback
+import re
+import json
+import random   # 🔥 WAJIB
+import html     # 🔥 biar ga error escape
+from datetime import datetime
+from queue import Queue
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import Updater, MessageHandler, Filters, CallbackContext, CommandHandler, CallbackQueryHandler
+from telethon import TelegramClient
+import database0
+from fitur import register_fitur
+from user import register_menu
+from emoji import build_emoji
+from rekab import register_rekab
+from font import register_font
+from absen import register_absen
+from jobdast import register_jobdast
+
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+PAGE_SIZE = 10  # jumlah per halaman
+
+TOKEN = "8307438695:AAGsyFa0IJQqv1zI1btvrqQsF4jnvMVLi5Q"
+API_URL = "http://127.0.0.1:5000/get"
+TARGET_CHATS = [-1002430300514]
+FORCE_GROUP = -1002430300514   # 🔥 WAJIB (buat cek join)
+FORCE_LINK = "https://t.me/officialhyperion"
+OWNER_IDS = [8209644174, 5674665043, 8730304700]
+PARTNER_FILE = "partner.json0"
+SETTING_FILE = "setting.json0"
+BUTTON_FILE = "buttons.json0"
+LOG_CHAT_ID = -1003812690414
+QUEUE_FILE = "queue.json0"
+api_id = 33370509
+api_hash = "669af6caebf2aca264b16cf8b40d37b2"
+client = TelegramClient("session_new0", api_id, api_hash)
+task_queue = Queue()
+running_task = False  # 🔥 ANTI DOUBLE TASK
+
+# ================= SETTING ============
+def load_setting():
+    if not os.path.exists(SETTING_FILE):
+        return {}
+
+    try:
+        with open(SETTING_FILE, "r") as f:
+            data = json.load(f)
+
+            if not isinstance(data, dict):
+                return {}
+
+            return data
+
+    except Exception as e:
+        print("❌ LOAD SETTING ERROR:", e)
+        return {}
+
+
+def save_setting(data):
+    try:
+        # pastikan folder ada (kalau nanti path dipindah)
+        folder = os.path.dirname(SETTING_FILE)
+        if folder and not os.path.exists(folder):
+            os.makedirs(folder)
+
+        with open(SETTING_FILE, "w") as f:
+            json.dump(data, f, indent=4)
+
+    except Exception as e:
+        print("❌ SAVE SETTING ERROR:", e)
+
+# ================= FILE (FIXED & SUPER STABLE) =================
+# ================= FILE (FIXED SUPER STABLE + DEBUG) =================
+
+def load_partner():
+    import os
+    import json
+
+    if not os.path.exists(PARTNER_FILE):
+        print("⚠️ partner file ga ada, return kosong")
+        return []
+
+    try:
+        with open(PARTNER_FILE, "r") as f:
+            data = json.load(f)
+
+        if not isinstance(data, list):
+            print("⚠️ format bukan list, return kosong")
+            return []
+
+        print(f"✅ LOAD PARTNER ({len(data)} data)")
+        return data
+
+    except Exception as e:
+        print("❌ LOAD PARTNER ERROR:", e)
+        return []
+
+
+def save_partner(data):
+    try:
+        print("\n🔥 SAVE PARTNER DIPANGGIL")
+        print("📊 TOTAL DATA MASUK:", len(data))
+
+        print("📍 CALL TRACE (SAFE MODE)")
+
+        # ================= VALIDASI =================
+        if not isinstance(data, list):
+            print("❌  DATA BUKAN LIST, CANCEL")
+            return
+
+        clean_data = []
+        seen = set()
+
+        for p in data:
+            if isinstance(p, dict) and "link" in p:
+                link = p.get("link")
+
+                if not link or not isinstance(link, str):
+                    continue
+
+                if link in seen:
+                    continue
+
+                seen.add(link)
+                clean_data.append(p)
+
+        # ================= 🔒 ANTI WIPE =================
+        if len(clean_data) == 0 and os.path.exists(PARTNER_FILE):
+            print("🚨 DETECT DATA JADI 0 → SAVE DIBATALKAN (ANTI HILANG)")
+            return
+
+        # ================= BACKUP =================
+        if os.path.exists(PARTNER_FILE):
+            backup_dir = "backup_partner"
+
+            if not os.path.exists(backup_dir):
+                os.makedirs(backup_dir)
+
+            timestamp = int(time.time())
+            backup_file = f"{backup_dir}/partner_{timestamp}.json"
+
+            try:
+                shutil.copy(PARTNER_FILE, backup_file)
+                print(f"📦 Backup dibuat: {backup_file}")
+            except Exception as e:
+                print("❌  Backup error:", e)
+
+        # ================= SAFE WRITE =================
+        temp_file = PARTNER_FILE + ".tmp"
+
+        with open(temp_file, "w") as f:
+            json.dump(clean_data, f, indent=2)
+
+        os.replace(temp_file, PARTNER_FILE)
+
+        print(f"✅  BERHASIL SAVE ({len(clean_data)} data)")
+
+        # ================= AUTO CLEAN BACKUP =================
+        try:
+            if os.path.exists("backup_partner"):
+                backups = sorted(os.listdir("backup_partner"))
+
+                if len(backups) > 20:
+                    for old in backups[:-20]:
+                        os.remove(f"backup_partner/{old}")
+                        print(f"🗑️ Backup lama dihapus: {old}")
+
+        except Exception:
+            pass
+
+    except Exception as e:
+        print("❌  SAVE PARTNER ERROR:", e)
+        traceback.print_exc()
+
+# ================= BUTTON =================
+
+def load_buttons():
+    if not os.path.exists(BUTTON_FILE):
+        print("⚠️ BUTTON FILE GA ADA")
+        return {}
+
+    try:
+        with open(BUTTON_FILE, "r") as f:
+            data = json.load(f)
+            print("✅ BUTTON LOADED:", data)
+            return data
+    except Exception as e:
+        print("❌ LOAD BUTTON ERROR:", e)
+        return {}
+
+
+def save_buttons(data):
+    try:
+        temp_file = BUTTON_FILE + ".tmp"
+
+        with open(temp_file, "w") as f:
+            json.dump(data, f, indent=2)
+
+        os.replace(temp_file, BUTTON_FILE)
+
+        print("✅ BUTTON KE SAVE:", data)
+
+    except Exception as e:
+        print("❌ SAVE BUTTON ERROR:", e)
+
+
+# ================= SAVE GROUP =================
+
+def save_last_group(update, context):
+    user_id = str(update.effective_user.id)
+    chat_id = update.effective_chat.id
+
+    try:
+        # 🔥 HANYA GROUP
+        if chat_id < 0:
+
+            # 🔥 JANGAN OVERWRITE DATA
+            if user_id not in auto_data:
+                auto_data[user_id] = {}
+
+            auto_data[user_id]["chat_id"] = chat_id
+            
+
+            print(f"📌 GROUP KE SAVE: {user_id} -> {chat_id}")
+
+            # 🔥 LOG KE TELEGRAM
+            try:
+                context.bot.send_message(
+                    LOG_CHAT_ID,
+                    f"📌 SET TARGET GROUP\n"
+                    f"👤 {user_id}\n"
+                    f"🎯 {chat_id}"
+                )
+            except Exception as log_err:
+                print("LOG ERROR:", log_err)
+
+    except Exception as e:
+        print("❌ SAVE GROUP ERROR:", e)
+        try:
+            context.bot.send_message(
+                LOG_CHAT_ID,
+                f"❌ ERROR SAVE GROUP\n👤 {user_id}\n{e}"
+            )
+        except Exception as log_err:
+            print("LOG ERROR:", log_err)
+
+# ================= PERSISTENT QUEUE =================
+def save_queue():
+    try:
+        data = []
+        while not task_queue.empty():
+            data.append(task_queue.get())
+        with open(QUEUE_FILE, "w") as f:
+            json.dump(data, f)
+        for item in data:
+            task_queue.put(item)
+    except:
+        pass
+
+def load_queue():
+    try:
+        with open(QUEUE_FILE, "r") as f:
+            data = json.load(f)
+            for item in data:
+                task_queue.put(tuple(item))
+    except:
+        pass
+
+# ================= GLOBAL =================
+manual_setup = {}
+stop_flag = {}
+manual_messages = {}
+auto_data = {}
+custom_buttons = load_buttons()  # 🔥 PENTING (BUKAN load_partner)
+
+# 🔥 TAMBAHAN WAJIB
+recent_messages = set()
+rate_limit = {}
+last_activity = {}
+
+# ================= UTIL =================
+
+def normalize_link(link):
+    link = link.strip()
+    link = link.replace("https://", "").replace("http://", "")
+    link = link.replace("t.me/", "")
+    return link.lower()
+
+
+def get_group_name(link):
+    username = normalize_link(link)
+
+    # 1. TELETHON (kalau ada cache)
+    try:
+        entity = loop.run_until_complete(client.get_entity(username))
+        if entity.title:
+            return entity.title
+    except Exception as e:
+        print("❌ telethon fail:", e)
+
+    # 2. SCRAPE PREVIEW (kayak Telegram preview)
+    try:
+        url = f"https://t.me/{username}"
+        res = requests.get(url, timeout=5)
+
+        match = re.search(r'<meta property="og:title" content="([^"]+)"', res.text)
+        if match:
+            return match.group(1)
+
+    except Exception as e:
+        print("❌ scrape fail:", e)
+
+    return "Unknown Group"
+
+
+# ================= COMMAND =================
+def add_livechat(update, context):
+    if update.effective_user.id not in OWNER_IDS:
+        return
+
+    if not context.args:
+        return update.message.reply_text(
+            "❌ kirim link\nContoh: /addlivechat https://t.me/xxxx"
+        )
+
+    link = context.args[0]
+
+    if not link.startswith("https://t.me/"):
+        return update.message.reply_text("❌ link harus https://t.me/")
+
+    data = load_setting()
+    data["livechat"] = link
+    save_setting(data)
+
+    update.message.reply_text("✅ Live chat disimpan")
+
+def del_livechat(update, context):
+    if update.effective_user.id not in OWNER_IDS:
+        return
+
+    data = load_setting()
+    data.pop("livechat", None)
+    save_setting(data)
+
+    update.message.reply_text("✅ Live chat dihapus")
+
+def add_partner(update, context):
+    if update.effective_user.id not in OWNER_IDS:
+        return
+
+    if not context.args:
+        update.message.reply_text("❌ format: /addpartner link")
+        return
+
+    link = context.args[0]
+    data = load_partner()
+
+    # ================= CEK DUPLIKAT =================
+    for p in data:
+        if link in p.get("link", ""):
+            update.message.reply_text("⚠️ sudah ada")
+            return
+
+    # ================= PRIVATE LINK =================
+    if "t.me/+" in link or "joinchat" in link:
+        try:
+            name = get_group_name(link)
+
+            data.append({
+                "link": link,  # ✅ simpan apa adanya (JANGAN diubah)
+                "username": "private",
+                "name": name
+            })
+
+            save_partner(data)
+            update.message.reply_text(f"✅ Partner private ditambah:\n{name}")
+
+        except Exception as e:
+            update.message.reply_text(f"❌ Gagal add private\n{e}")
+
+        return
+
+    # ================= PUBLIC LINK =================
+    username = normalize_link(link)
+    name = get_group_name(link)
+
+    data.append({
+        "link": f"https://t.me/{username}",
+        "username": username,
+        "name": name
+    })
+
+    save_partner(data)
+    update.message.reply_text(f"✅ Partner ditambah:\n{name}")
+
+def del_partner(update, context):
+    if update.effective_user.id not in OWNER_IDS:
+        return
+
+    if not context.args:
+        update.message.reply_text("❌ format: /delpartner link")
+        return
+
+    link = context.args[0]
+    data = load_partner()
+
+    new_data = []
+
+    for p in data:
+        if link in p.get("link", ""):
+            continue
+        new_data.append(p)
+
+    save_partner(new_data)
+    update.message.reply_text("✅ Partner dihapus")
+
+
+def tagall_cmd(update, context):
+    chat = update.effective_chat
+    user = update.effective_user
+
+    # ❌ Jangan di private
+    if chat.type == "private":
+        return
+
+    # 🔥 CEK ADMIN
+    try:
+        member = context.bot.get_chat_member(chat.id, user.id)
+        if member.status not in ["administrator", "creator"]:
+            update.message.reply_text("❌ Khusus admin")
+            return
+    except:
+        return
+
+    # 🔥 TAMBAHAN INI (WAJIB)
+    user_id = str(update.effective_user.id)
+
+    if user_id not in auto_data:
+        auto_data[user_id] = {}
+
+    auto_data[user_id]["chat_id"] = chat.id
+    save_autotag()
+
+    # ================= LANJUT KODE LU =================
+    text = " ".join(context.args)
+
+    if text:
+        manual_setup[chat.id] = {"msg": text, "mode": "text"}
+    elif update.message.reply_to_message:
+        manual_setup[chat.id] = {
+            "msg": update.message.reply_to_message,
+            "mode": "reply"
+        }
+    else:
+        update.message.reply_text("❌ Isi teks atau reply pesan")
+        return
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("2 menit", callback_data="dur_2"),
+         InlineKeyboardButton("5 menit", callback_data="dur_5")],
+        [InlineKeyboardButton("10 menit", callback_data="dur_10"),
+         InlineKeyboardButton("30 menit", callback_data="dur_30")],
+        [InlineKeyboardButton("60 menit", callback_data="dur_60"),
+         InlineKeyboardButton("Unlimited", callback_data="dur_unli")]
+    ])
+
+    update.message.reply_text(
+        "⏱ Pilih durasi:",
+        reply_markup=keyboard
+    )
+
+def cancel_cmd(update, context):
+    global stop_flag
+
+    chat = update.effective_chat
+    user = update.effective_user
+
+    # ❌ Jangan boleh di private
+    if chat.type == "private":
+        return
+
+    # 🔥 CEK ADMIN
+    try:
+        member = context.bot.get_chat_member(chat.id, user.id)
+        if member.status not in ["administrator", "creator"]:
+            update.message.reply_text("❌ Khusus admin")
+            return
+    except:
+        return
+
+    # 🔥 STOP
+    stop_flag[chat.id] = True
+
+    try:
+        context.bot.send_message(chat.id, "⛔ Tagall dihentikan")
+    except:
+        pass
+        
+
+# ================= LIST COMMAND =================
+def list_partner(update, context):
+    print("🔥 list_partner kepanggil")
+
+    if update.effective_user.id not in OWNER_IDS:
+        return
+
+    send_partner_page_message(update, context, 0)
+
+
+# ================= SEND (FROM COMMAND) =================
+def send_partner_page_message(update, context, page):
+    data = load_partner()
+
+    if not data:
+        update.message.reply_text("❌ kosong")
+        return
+
+    total = len(data)
+    start = page * PAGE_SIZE
+    end = start + PAGE_SIZE
+
+    text = f"📋 LIST PARTNER\nHalaman {page+1}\n\n"
+
+    for i, p in enumerate(data[start:end], start + 1):
+        text += f"{i}. {p.get('name','-')}\n{p.get('link','-')}\n\n"
+
+    buttons = build_buttons(page, total)
+
+    update.message.reply_text(text, reply_markup=buttons)
+
+
+# ================= SEND (FROM CALLBACK MENU) =================
+def send_partner_page_callback(query, context, page):
+    data = load_partner()
+
+    if not data:
+        query.message.reply_text("❌ kosong")
+        return
+
+    total = len(data)
+    start = page * PAGE_SIZE
+    end = start + PAGE_SIZE
+
+    text = f"📋 LIST PARTNER\nHalaman {page+1}\n\n"
+
+    for i, p in enumerate(data[start:end], start + 1):
+        text += f"{i}. {p.get('name','-')}\n{p.get('link','-')}\n\n"
+
+    buttons = build_buttons(page, total)
+
+    query.message.reply_text(text, reply_markup=buttons)
+
+
+# ================= BUILD BUTTON =================
+def build_buttons(page, total):
+    buttons = []
+
+    if page > 0:
+        buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"partner_{page-1}"))
+
+    if (page + 1) * PAGE_SIZE < total:
+        buttons.append(InlineKeyboardButton("➡️ Next", callback_data=f"partner_{page+1}"))
+
+    buttons.append(InlineKeyboardButton("❌ Close", callback_data="partner_close"))
+
+    return InlineKeyboardMarkup([buttons])
+
+
+# ================= CALLBACK PARTNER =================
+def partner_callback(update, context):
+    print("🔥 CALLBACK PARTNER")
+
+    query = update.callback_query
+    query.answer()
+
+    data = query.data
+    print("DATA:", data)
+
+    if data == "partner_close":
+        query.message.delete()
+        return
+
+    try:
+        page = int(data.split("_")[1])
+    except:
+        return
+
+    data_list = load_partner()
+    total = len(data_list)
+
+    start = page * PAGE_SIZE
+    end = start + PAGE_SIZE
+
+    text = f"📋 LIST PARTNER\nHalaman {page+1}\n\n"
+
+    for i, p in enumerate(data_list[start:end], start + 1):
+        text += f"{i}. {p.get('name','-')}\n{p.get('link','-')}\n\n"
+
+    buttons = build_buttons(page, total)
+
+    query.edit_message_text(text, reply_markup=buttons)
+
+
+# ================= CALLBACK MENU =================
+def menu_callback(update, context):
+    print("🔥 CALLBACK MENU")
+
+    query = update.callback_query
+    query.answer()
+
+    data = query.data
+    print("MENU DATA:", data)
+
+    if data == "cmd_listpartner":
+        send_partner_page_callback(query, context, 0)
+
+
+# ================= REGISTER =================
+def register_partner(dp):
+    dp.add_handler(CallbackQueryHandler(partner_callback, pattern="^partner_"))
+    dp.add_handler(CallbackQueryHandler(menu_callback, pattern="^cmd_"))
+
+def addbuttontag_cmd(update, context):
+    print("🔥 addbuttontag kepanggil")
+
+    chat = update.effective_chat
+    user = update.effective_user
+
+    # 🔥 HARUS PRIVATE
+    if chat.type != "private":
+        update.message.reply_text("❌ Gunakan di private bot")
+        return
+
+    # 🔥 OWNER ONLY
+    if user.id not in OWNER_IDS:
+        update.message.reply_text("❌ Khusus owner")
+        return
+
+    # 🔥 FORMAT
+    if not context.args:
+        update.message.reply_text("Format:\n/addbuttontag NAMA - LINK")
+        return
+
+    text = " ".join(context.args)
+
+    if "-" not in text:
+        update.message.reply_text("Format:\n/addbuttontag NAMA - LINK")
+        return
+
+    name, link = text.split("-", 1)
+    name = name.strip()
+    link = link.strip()
+
+    # 🔥 LOOP SEMUA TARGET CHAT
+    for gc_id in TARGET_CHATS:
+        custom_buttons[str(gc_id)] = {
+            "name": name,
+            "link": link
+        }
+
+    save_partner(custom_buttons)
+
+    update.message.reply_text(
+        f"✅ Button diset ke {len(TARGET_CHATS)} grup\n{name} -> {link}"
+    )
+    
+def fancy_name(text):
+    fonts = [
+        ("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+         "𝑨𝑩𝑪𝑫𝑬𝑭𝑮𝑯𝑰𝑱𝑲𝑳𝑴𝑵𝑶𝑷𝑸𝑹𝑺𝑻𝑼𝑽𝑾𝑿𝒀𝒁abcdefghijklmnopqrstuvwxyz"),
+        ("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+         "𝓐𝓑𝓒𝓓𝓔𝓕𝓖𝓗𝓘𝓙𝓚𝓛𝓜𝓝𝓞𝓟𝓠𝓡𝓢𝓣𝓤𝓥𝓦𝓧𝓨𝓩abcdefghijklmnopqrstuvwxyz"),
+        ("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+         "𝙰𝙱𝙲𝙳𝙴𝙵𝙶𝙷𝙸𝙹𝙺𝙻𝙼𝙽𝙾𝙿𝚀𝚁𝚂𝚃𝚄𝚅𝚆𝚇𝚈𝚉abcdefghijklmnopqrstuvwxyz"),
+    ]
+
+    normal, fancy = random.choice(fonts)
+    return text.translate(str.maketrans(normal, fancy))
+
+
+def clearauto(update, context):
+    user_id = str(update.effective_user.id)
+
+    if user_id in auto_data:
+        auto_data.pop(user_id)
+        save_autotag()
+        update.message.reply_text("🧹 DATA AUTO DIHAPUS")
+    else:
+        update.message.reply_text("❌ Tidak ada data auto")
+
+# ================= HANDLE DURASI =================
+def handle_durasi(update, context):
+    query = update.callback_query
+    chat_id = query.message.chat.id
+
+    # 🔥 ANTI ERROR CALLBACK EXPIRED
+    try:
+        query.answer()
+    except:
+        pass
+
+    if chat_id not in manual_setup:
+        query.edit_message_text("❌ Session hilang")
+        return
+
+    data = query.data.split("_")[1]
+
+    durasi_map = {
+        "2": 120,
+        "5": 300,
+        "10": 600,
+        "30": 1800,
+        "60": 3600,
+        "unli": None
+    }
+
+    duration = durasi_map.get(data)
+
+    setup = manual_setup[chat_id]
+    msg = setup["msg"]
+    mode = setup["mode"]
+
+    query.edit_message_text("🚀 Tagall manual dimulai...")
+
+    import threading
+    t = threading.Thread(
+        target=run_tagall_manual,
+        args=(context, chat_id, msg, mode, duration),
+        daemon=True
+    )
+    t.start()
+
+# ================= RUN MANUAL TAGALL =================
+def run_tagall_manual(context, chat_id, msg, mode, duration):
+    global stop_flag, manual_messages, last_activity
+
+    import random
+    import time
+    import html
+    import re
+    from collections import deque
+
+    from emoji import build_emoji  
+
+    stop_flag[chat_id] = False  
+    manual_messages[chat_id] = [] 
