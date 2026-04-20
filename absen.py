@@ -1,10 +1,10 @@
-# ================= ABSEN BOT SYSTEM (FINAL UPGRADE) =================
-
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import CommandHandler, CallbackQueryHandler, MessageHandler, Filters
 from datetime import datetime
 import pytz
 import sqlite3
+import math
+import traceback
 
 WIB = pytz.timezone("Asia/Jakarta")
 
@@ -27,41 +27,62 @@ db.commit()
 
 absen_msg = {}
 pending_izin = {}
+job_refresh = {}
 
 last_day = None
 last_week = None
 
 
-# ================= SAVE =================
+# ================= DEBUG =================
+
+def debug(msg):
+    print(f"[ABSEN DEBUG] {msg}")
+
+
+# ================= BAR =================
+
+def status_bar(value, speed=1.0, length=10):
+    t = datetime.now().second * speed
+    wave = int((math.sin(t / 2) + 1) * (length / 2))
+    return "▰" * wave + "▱" * (length - wave) + f" {value}"
+
+
+# ================= SAVE (NOW WITH TIME) =================
 
 def save_absen(chat_id, user_id, name, tipe, alasan=None):
+    now = datetime.now(WIB).strftime("%H:%M WIB")
+
     cur.execute("""
         INSERT INTO absen (chat_id, user_id, name, type, alasan, date)
         VALUES (?, ?, ?, ?, ?, ?)
-    """, (chat_id, user_id, name, tipe, alasan, datetime.now(WIB).strftime("%Y-%m-%d")))
+    """, (chat_id, user_id, name, tipe, alasan, now))
     db.commit()
 
 
-# ================= LOAD =================
+# ================= LOAD (WITH USER ID + TIME) =================
 
 def load_absen(chat_id):
-    cur.execute("SELECT name, type, alasan FROM absen WHERE chat_id=?", (chat_id,))
+    cur.execute("""
+        SELECT user_id, name, type, alasan, date
+        FROM absen
+        WHERE chat_id=?
+    """, (chat_id,))
     rows = cur.fetchall()
 
     data = {"hadir": [], "izin": [], "sakit": []}
 
-    for name, tipe, alasan in rows:
+    for uid, name, tipe, alasan, time in rows:
         if tipe == "hadir":
-            data["hadir"].append(name)
+            data["hadir"].append((uid, name, time))
         elif tipe == "sakit":
-            data["sakit"].append(name)
+            data["sakit"].append((uid, name, time))
         elif tipe == "izin":
-            data["izin"].append((name, alasan))
+            data["izin"].append((uid, name, alasan, time))
 
     return data
 
 
-# ================= UI STYLE (ESTETIK MAHAL) =================
+# ================= FORMAT =================
 
 def format_absen(chat_id):
     data = load_absen(chat_id)
@@ -71,48 +92,41 @@ def format_absen(chat_id):
 
     text = f"""
 ╔════════════════════════════════╗
-        ✦ ATTENDANCE REPORT ✦
+       ✦ ATTENDANCE AUTO ABSEN ✦
 ╚════════════════════════════════╝
 
 📅 {now.strftime('%A, %d %B %Y')}
-────────────────────────────────
-📊 STATUS SUMMARY
+⏰ {now.strftime('%H:%M')} WIB ABSEN DIBUKA
 
-🟢 HADIR   ▰▰▰ {len(data['hadir'])}
-🟡 IZIN    ▰ {len(data['izin'])}
-🔴 SAKIT   ▰ {len(data['sakit'])}
+🟢 HADIR : {status_bar(len(data['hadir']), 1.2)}
+🟡 IZIN  : {status_bar(len(data['izin']), 0.8)}
+🔴 SAKIT : {status_bar(len(data['sakit']), 0.5)}
 
-👥 TOTAL PARTICIPANTS : {total}
-────────────────────────────────
-🏷 PARTICIPANT LOG
+👥 TOTAL : {total}
+────────────────────────
 """
 
-    no = 1
+    # HADIR
+    for uid, name, time in data["hadir"]:
+        text += f"\n➤ 🟢 [{name}](tg://user?id={uid}) — {time}"
 
-    for n in data["hadir"]:
-        text += f"\n➤ 🟢 {n}"
-        no += 1
+    # IZIN
+    for uid, name, alasan, time in data["izin"]:
+        text += f"\n➤ 🟡 [{name}](tg://user?id={uid}) ({alasan}) — {time}"
 
-    for n, a in data["izin"]:
-        text += f"\n➤ 🟡 {n}\n   └ reason: {a}"
-
-    for n in data["sakit"]:
-        text += f"\n➤ 🔴 {n}\n   └ status: sick"
+    # SAKIT
+    for uid, name, time in data["sakit"]:
+        text += f"\n➤ 🔴 [{name}](tg://user?id={uid}) — {time}"
 
     if total == 0:
         text += "\nBelum ada absensi."
 
-    text += f"""
+    text += "\n────────────────────────\n⚡ SYSTEM: ACTIVE LIVE SYNC\n🛍 @storegarf"
 
-────────────────────────────────
-⚡ SYSTEM STATUS: ACTIVE
-🛍️ My STORE : @storegarf
-╚════════════════════════════════╝
-"""
     return text
 
 
-# ================= BUTTON =================
+# ================= KEYBOARD =================
 
 def get_keyboard():
     return InlineKeyboardMarkup([
@@ -122,7 +136,7 @@ def get_keyboard():
             InlineKeyboardButton("🔴 SAKIT", callback_data="absen_sakit"),
         ],
         [
-            InlineKeyboardButton("🛍️ STORE", url="https://t.me/storegarf")
+            InlineKeyboardButton("🛍 STORE", url="https://t.me/storegarf")
         ]
     ])
 
@@ -132,27 +146,28 @@ def get_keyboard():
 def daily_reset(context):
     global last_day
 
-    now = datetime.now(WIB).strftime("%Y-%m-%d")
+    today = datetime.now(WIB).strftime("%Y-%m-%d")
 
-    if last_day == now:
+    if last_day == today:
         return
+
+    debug("DAILY RESET TRIGGERED")
 
     chats = cur.execute("SELECT DISTINCT chat_id FROM absen").fetchall()
 
     for (chat_id,) in chats:
         try:
-            text = "📊 REKAP HARI KEMARIN\n\n" + format_absen(chat_id)
-            context.bot.send_message(chat_id, text)
+            context.bot.send_message(chat_id, "📊 REKAP HARI KEMARIN\n\n" + format_absen(chat_id), parse_mode="Markdown")
         except:
             pass
 
     cur.execute("DELETE FROM absen")
     db.commit()
 
-    last_day = now
+    last_day = today
 
 
-# ================= WEEKLY REPORT =================
+# ================= WEEKLY =================
 
 def weekly_report(context):
     global last_week
@@ -168,20 +183,20 @@ def weekly_report(context):
     for (chat_id,) in chats:
         try:
             cur.execute("""
-                SELECT name, COUNT(*) as total
+                SELECT name, COUNT(*)
                 FROM absen
                 WHERE chat_id=? AND type='hadir'
                 GROUP BY user_id
-                ORDER BY total DESC
+                ORDER BY COUNT(*) DESC
                 LIMIT 10
             """, (chat_id,))
 
             rows = cur.fetchall()
 
-            text = "🏆 REKAP MINGGUAN TERAKTIF\n\n"
+            text = "🏆 RANKING MINGGUAN\n\n"
 
             if not rows:
-                text += "Belum ada data minggu ini."
+                text += "Belum ada data."
             else:
                 for i, (name, total) in enumerate(rows, 1):
                     text += f"{i}. {name} - {total}x hadir\n"
@@ -189,9 +204,38 @@ def weekly_report(context):
             context.bot.send_message(chat_id, text)
 
         except:
-            pass
+            traceback.print_exc()
 
     last_week = week
+
+
+# ================= REFRESH =================
+
+def refresh_job(context):
+    chat_id = context.job.context
+
+    try:
+        context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=absen_msg.get(chat_id),
+            text=format_absen(chat_id),
+            reply_markup=get_keyboard(),
+            parse_mode="Markdown"
+        )
+    except:
+        pass
+
+
+def start_refresh_job(context, chat_id):
+    if chat_id in job_refresh:
+        job_refresh[chat_id].schedule_removal()
+
+    job_refresh[chat_id] = context.job_queue.run_repeating(
+        refresh_job,
+        interval=5,
+        first=0,
+        context=chat_id
+    )
 
 
 # ================= COMMAND =================
@@ -201,32 +245,31 @@ def absen_cmd(update, context):
 
     chat_id = update.effective_chat.id
 
-    if chat_id in absen_msg:
-        try:
-            context.bot.unpin_chat_message(chat_id, absen_msg[chat_id])
-        except:
-            pass
-
     msg = update.message.reply_text(
         format_absen(chat_id),
-        reply_markup=get_keyboard()
+        reply_markup=get_keyboard(),
+        parse_mode="Markdown"
     )
 
     absen_msg[chat_id] = msg.message_id
+
+    start_refresh_job(context, chat_id)
 
     try:
         context.bot.pin_chat_message(chat_id, msg.message_id, disable_notification=True)
     except:
         pass
 
+    debug(f"/absen OK {chat_id}")
 
-# ================= BUTTON HANDLER =================
+
+# ================= BUTTON =================
 
 def absen_button(update, context):
-    daily_reset(context)
-
     query = update.callback_query
     query.answer()
+
+    daily_reset(context)
 
     user = query.from_user
     chat_id = query.message.chat.id
@@ -250,19 +293,18 @@ def absen_button(update, context):
     try:
         context.bot.edit_message_text(
             chat_id=chat_id,
-            message_id=absen_msg[chat_id],
+            message_id=absen_msg.get(chat_id),
             text=format_absen(chat_id),
-            reply_markup=get_keyboard()
+            reply_markup=get_keyboard(),
+            parse_mode="Markdown"
         )
     except:
-        pass
+        traceback.print_exc()
 
 
 # ================= IZIN =================
 
 def izin_handler(update, context):
-    daily_reset(context)
-
     user = update.effective_user
     chat_id = update.effective_chat.id
 
@@ -276,10 +318,14 @@ def izin_handler(update, context):
 
     del pending_izin[user.id]
 
+    debug(f"IZIN SAVED {user.id}")
 
-# ================= REGISTER FIX =================
+
+# ================= REGISTER =================
 
 def register_absen(app):
+    debug("ABSEN MODULE LOADED")
+
     app.add_handler(CommandHandler("absen", absen_cmd))
     app.add_handler(CallbackQueryHandler(absen_button, pattern="absen_"))
     app.add_handler(MessageHandler(Filters.text & ~Filters.command, izin_handler))
