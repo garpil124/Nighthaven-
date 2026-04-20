@@ -17,6 +17,11 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Updater, MessageHandler, Filters, CallbackContext, CommandHandler, CallbackQueryHandler
 from telethon import TelegramClient
 import database7
+from fitur import register_fitur
+from user import register_menu
+from emoji import build_emoji
+from rekab import register_rekab
+from font import register_font
 
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
