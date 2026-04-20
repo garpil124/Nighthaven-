@@ -1924,7 +1924,7 @@ def restore_cmd(update, context):
                     backup.write("buttons.json7")
 
                 if os.path.exists("database7"):
-                    for root, dirs, files2 in os.walk("database0"):
+                    for root, dirs, files2 in os.walk("database7"):
                         for f in files2:
                             backup.write(os.path.join(root, f))
 
@@ -1959,6 +1959,10 @@ def main():
 
     dp = updater.dispatcher
 
+    register_menu(dp)
+    register_rekab(dp)
+    register_fitur(dp)
+    register_font(dp)
     # ================= COMMAND =================
     dp.add_handler(CommandHandler("restore", restore_cmd))
     dp.add_handler(CommandHandler("start", start_cmd))
