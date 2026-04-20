@@ -10,7 +10,7 @@ WIB = pytz.timezone("Asia/Jakarta")
 
 # ================= DB =================
 
-db = sqlite3.connect("absen.db", check_same_thread=False)
+db = sqlite3.connect("absen2.db", check_same_thread=False)
 cur = db.cursor()
 
 cur.execute("""
