@@ -6,7 +6,7 @@ from telegram.ext import CommandHandler
 def menu_cmd(update, context):
     text = """
 ╭━━━━━━━━━━━━━━━━━━━━━━━╮
-   ⚡ 𝗛𝗘𝗟𝗣 & 𝗙𝗜𝗧𝗨𝗥 𝗕𝗢𝗧 ⚡
+     ⚡ 𝗛𝗘𝗟𝗣 & 𝗙𝗜𝗧𝗨𝗥 𝗕𝗢𝗧 ⚡
 ╰━━━━━━━━━━━━━━━━━━━━━━━╯
 
 👋 𝐒𝐞𝐥𝐚𝐦𝐚𝐭 𝐝𝐚𝐭𝐚𝐧𝐠 𝐝𝐢 𝐛𝐨𝐭 𝐚𝐮𝐭𝐨𝐭𝐚𝐠𝐚𝐥𝐥!
