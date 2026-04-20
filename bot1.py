@@ -1871,73 +1871,245 @@ def handle_private(update: Update, context: CallbackContext):
         threading.Thread(target=tagall_worker, daemon=True).start()
 
 
-# ================= MAIN =================
-def restore_cmd(update, context):
-    if update.effective_user.id != OWNER_ID:
+# ================= CORE =================
+def is_owner(user_id):
+    return user_id in OWNER_IDS
+
+def set_lock(state):
+    global BOT_LOCK
+    BOT_LOCK = state
+
+
+# ================= SAFE ZIP CHECK =================
+def safe_zip(file_path):
+    import zipfile
+    try:
+        with zipfile.ZipFile(file_path, 'r') as z:
+            return z.testzip() is None
+    except:
+        return False
+
+
+# ================= SEND BACKUP TO LOG =================
+def send_backup_to_log(context, file_name):
+    try:
+        with open(file_name, "rb") as f:
+            context.bot.send_document(
+                chat_id=LOG_GROUP_ID,
+                document=f,
+                caption="📦 AUTO BACKUP BOT"
+            )
+    except:
+        pass
+
+
+# ================= AUTO BACKUP =================
+def backup_cmd_auto(context):
+    import zipfile, os, time
+
+    name = f"auto_backup_{int(time.time())}.zip"
+
+    with zipfile.ZipFile(name, "w", zipfile.ZIP_DEFLATED) as z:
+        for r, _, f in os.walk("."):
+
+            if "venv" in r:
+                continue
+
+            for x in f:
+                path = os.path.join(r, x)
+
+                # ================= REAL FILES ONLY =================
+                if x in [
+                    "setting.json7",
+                    "buttons.json7",
+                    "buttons.json0",
+                    "partner.json22"
+                ]:
+                    z.write(path)
+
+                elif x.endswith(".db") or x == "absen2.db":
+                    z.write(path)
+
+                elif "database7" in r:
+                    z.write(path)
+
+    return name
+
+
+# ================= BACKUP COMMAND =================
+def backup_cmd(update, context):
+    if not is_owner(update.effective_user.id):
         return
 
-    if not update.message.reply_to_message or not update.message.reply_to_message.document:
-        update.message.reply_text("❌ reply file zip dengan /restore")
+    update.message.reply_text("📦 backup...")
+
+    backup_name = f"backup_before_restore_{int(time.time())}.zip"
+
+    import zipfile, os, time
+
+    with zipfile.ZipFile(backup_name, "w", zipfile.ZIP_DEFLATED) as backup:
+
+        # ================= FILE UTAMA =================
+        if os.path.exists("partner.json22"):
+            backup.write("partner.json22")
+
+        if os.path.exists("setting.json7"):
+            backup.write("setting.json7")
+
+        if os.path.exists("buttons.json7"):
+            backup.write("buttons.json7")
+
+        if os.path.exists("buttons.json0"):
+            backup.write("buttons.json0")
+
+        if os.path.exists("absen2.db"):
+            backup.write("absen2.db")
+
+        # ================= DATABASE =================
+        if os.path.exists("database7"):
+            for root, dirs, files2 in os.walk("database7"):
+                for f in files2:
+                    backup.write(os.path.join(root, f))
+
+    with open(backup_name, "rb") as f:
+        update.message.reply_document(f, caption="📦 backup siap")
+
+    send_backup_to_log(context, backup_name)
+
+
+# ================= RESTORE SYSTEM =================
+def restore_cmd(update, context):
+    if not is_owner(update.effective_user.id):
         return
+
+    msg = update.message
+
+    if BOT_LOCK:
+        msg.reply_text("🔒 bot lock")
+        return
+
+    if not msg.reply_to_message or not msg.reply_to_message.document:
+        msg.reply_text("❌ reply file zip")
+        return
+
+    import tempfile, zipfile, os, shutil
+
+    temp = tempfile.mkdtemp()
+    rollback = tempfile.mkdtemp()
 
     try:
-        update.message.reply_text("⏳ restore sedang diproses...")
+        set_lock(True)
+        msg.reply_text("🔒 RESTORE START")
 
-        # ================= DOWNLOAD =================
-        file = update.message.reply_to_message.document.get_file()
+        file = context.bot.get_file(msg.reply_to_message.document.file_id)
         file.download("restore.zip")
 
-        import zipfile
-        import os
-        import time
-
-        # ================= VALIDASI ZIP =================
-        if not zipfile.is_zipfile("restore.zip"):
-            update.message.reply_text("❌ file bukan zip valid")
+        # ================= ZIP VALIDATION =================
+        if not safe_zip("restore.zip"):
+            msg.reply_text("❌ zip rusak / corrupt")
             return
 
-        with zipfile.ZipFile("restore.zip", 'r') as z:
-            files = z.namelist()
+        with zipfile.ZipFile("restore.zip", "r") as z:
+            z.extractall(temp)
 
-            # ================= VALIDASI ISI (FIX AMAN) =================
-            valid = (
-                "setting.json0" in files or
-                "partner.json0" in files or
-                "buttons.json0" in files or
-                "autotag.json0" in files
-            )
+        # ================= AUTO BACKUP BEFORE RESTORE =================
+        backup_name = backup_cmd_auto(context)
+        send_backup_to_log(context, backup_name)
 
-            if not valid:
-                update.message.reply_text("❌ isi zip tidak valid")
-                return
+        # ================= RESTORE FILES =================
+        for r, _, f in os.walk(temp):
+            for x in f:
 
-            # ================= BACKUP LAMA =================
-            backup_name = f"backup_before_restore_{int(time.time())}.zip"
-            with zipfile.ZipFile(backup_name, 'w') as backup:
-                if os.path.exists("partner.json22"):
-                    backup.write("partner.json22")
-                if os.path.exists("setting.json7"):
-                    backup.write("setting.json7")
+                if "autotag" in x.lower():
+                    continue
 
-                # 🔥 TAMBAHAN
-                if os.path.exists("buttons.json7"):
-                    backup.write("buttons.json7")
+                src = os.path.join(r, x)
+                dst = os.path.join(".", os.path.relpath(src, temp))
 
-                if os.path.exists("database7"):
-                    for root, dirs, files2 in os.walk("database7"):
-                        for f in files2:
-                            backup.write(os.path.join(root, f))
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
 
-            # ================= EXTRACT =================
-            z.extractall()
+                # ================= SAFE FILES =================
+                if x in [
+                    "setting.json7",
+                    "buttons.json7",
+                    "buttons.json0",
+                    "partner.json22",
+                    "absen2.db"
+                ] or x.endswith(".db"):
 
-        update.message.reply_text("✅ restore sukses, bot akan restart...")
+                    tmp = dst + ".new"
 
-        # ================= AUTO RESTART =================
+                    shutil.copy2(src, tmp)
+
+                    if os.path.exists(dst):
+                        shutil.copy2(dst, os.path.join(rollback, x))
+
+                    os.replace(tmp, dst)
+
+                elif "database7" in r:
+                    if os.path.exists(dst):
+                        shutil.copy2(dst, os.path.join(rollback, x))
+
+                    shutil.copy2(src, dst)
+
+                else:
+                    if os.path.exists(dst):
+                        shutil.copy2(dst, os.path.join(rollback, x))
+
+                    shutil.copy2(src, dst)
+
+        msg.reply_text("✅ RESTORE SUCCESS")
+
+        set_lock(False)
+        shutil.rmtree(temp, ignore_errors=True)
+
+        import os
         os.execv("/root/autobot/venv/bin/python", ["python", "bot1.py"])
 
     except Exception as e:
-        update.message.reply_text(f"❌ restore gagal\n{e}")
+
+        # ================= ROLLBACK =================
+        try:
+            for f in os.listdir(rollback):
+                shutil.copy2(
+                    os.path.join(rollback, f),
+                    os.path.join(".", f)
+                )
+
+            msg.reply_text(f"⚠️ rollback success\n{e}")
+
+        except Exception as r:
+            msg.reply_text(f"❌ rollback failed {r}")
+
+        finally:
+            set_lock(False)
+
+    finally:
+        shutil.rmtree(temp, ignore_errors=True)
+        shutil.rmtree(rollback, ignore_errors=True)
+
+
+# ================= DAILY BACKUP =================
+def daily_restart(context):
+    import os
+
+    try:
+        backup_file = backup_cmd_auto(context)
+        send_backup_to_log(context, backup_file)
+
+        context.bot.send_message(
+            chat_id=LOG_GROUP_ID,
+            text="🔁 DAILY RESTART DONE (REAL DB MODE)"
+        )
+
+        os.execv(
+            "/root/autobot/venv/bin/python",
+            ["python", "bot1.py"]
+        )
+
+    except Exception as e:
+        context.bot.send_message(LOG_GROUP_ID, f"❌ restart error: {e}")
+
 
 # ================= MAIN =================
 def main():
